@@ -1,5 +1,11 @@
 <?php
-include(dirname(__FILE__) . '/..//xhprof_lib/config.php');
+if (PHP_SAPI == 'cli') {
+  $_SERVER['REMOTE_ADDR'] = null;
+  $_SERVER['HTTP_HOST'] = null;
+  $_SERVER['REQUEST_URI'] = $_SERVER['SCRIPT_NAME'];
+}
+
+include(dirname(__FILE__) . '/../xhprof_lib/config.php');
 
 //I'm Magic :)
 class visibilitator
@@ -26,7 +32,7 @@ class visibilitator
 }
 
 // Only users from authorized IP addresses may control Profiling
-if ($controlIPs === false || in_array($_SERVER['REMOTE_ADDR'], $controlIPs))
+if ($controlIPs === false || in_array($_SERVER['REMOTE_ADDR'], $controlIPs) || PHP_SAPI == 'cli')
 {
   if (isset($_GET['_profile']))
   {
@@ -37,14 +43,13 @@ if ($controlIPs === false || in_array($_SERVER['REMOTE_ADDR'], $controlIPs))
     exit;
   }
 
-  if (isset($_COOKIE['_profile']) && $_COOKIE['_profile'])
+  if (isset($_COOKIE['_profile']) && $_COOKIE['_profile'] || PHP_SAPI == 'cli' && ((isset($_SERVER['XHPROF_PROFILE']) && $_SERVER['XHPROF_PROFILE']) || (isset($_ENV['XHPROF_PROFILE']) && $_ENV['XHPROF_PROFILE'])))
   {
       $_xhprof['display'] = true;
       $_xhprof['doprofile'] = true;
       $_xhprof['type'] = 1;
   }
 }
-
 
 
 //Certain URLs should never have a link displayed. Think images, xml, etc. 
@@ -83,12 +88,47 @@ if ($_xhprof['doprofile'] === false)
 }
 unset($weight);
 
+// Certain URLS should never be profiled.
+foreach($ignoreURLs as $url){
+    if (stripos($_SERVER['REQUEST_URI'], $url) !== FALSE)
+    {
+        $_xhprof['doprofile'] = false;
+        break;
+    }
+}
+unset($ignoreURLs);
+
+unset($url);
+
+// Certain domains should never be profiled.
+foreach($ignoreDomains as $domain){
+    if (stripos($_SERVER['HTTP_HOST'], $domain) !== FALSE)
+    {
+        $_xhprof['doprofile'] = false;
+        break;
+    }
+}
+unset($ignoreDomains);
+unset($domain);
+
 //Display warning if extension not available
 if (extension_loaded('xhprof') && $_xhprof['doprofile'] === true) {
     include_once dirname(__FILE__) . '/../xhprof_lib/utils/xhprof_lib.php';
     include_once dirname(__FILE__) . '/../xhprof_lib/utils/xhprof_runs.php';
-    xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY);
+    if (isset($ignoredFunctions) && is_array($ignoredFunctions) && !empty($ignoredFunctions)) {
+        xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY, array('ignored_functions' => $ignoredFunctions));
+    } else {
+        xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY);
+    }
 }elseif(!extension_loaded('xhprof') && $_xhprof['display'] === true)
 {
-	echo "Warning! Unable to profile run, xhprof extension not loaded\n";
+    $message = 'Warning! Unable to profile run, xhprof extension not loaded';
+    trigger_error($message, E_USER_WARNING);
 }
+
+function xhprof_shutdown_function() {
+    global $_xhprof;
+    require dirname(__FILE__).'/footer.php';
+}
+
+register_shutdown_function('xhprof_shutdown_function');
